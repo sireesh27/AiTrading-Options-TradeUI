@@ -1,0 +1,10 @@
+# FastAPI and web server
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+
+# Trading APIs
+tastytrade
+alpaca-py
+ib-async

@@ -1,0 +1,75 @@
+# Docker Compose for IB Gateway (Cloud Deployment)
+# This file sets up IB Gateway in a Docker container for cloud deployment
+
+version: '3.8'
+
+services:
+  ib-gateway:
+    # Using hartza-capital's production-ready IB Gateway image
+    image: ghcr.io/hartza-capital/ib-gateway:stable
+    container_name: ib-gateway
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Environment variables
+    environment:
+      # REQUIRED: Your IBKR credentials
+      - TWS_USERID=${IBKR_USERNAME}
+      - TWS_PASSWORD=${IBKR_PASSWORD}
+
+      # Trading mode: 'live' or 'paper'
+      - TRADING_MODE=${IBKR_TRADING_MODE:-paper}
+
+      # Optional: VNC password for remote access
+      - VNC_SERVER_PASSWORD=${VNC_PASSWORD:-changeme}
+
+      # Optional: Read-only API mode
+      - READ_ONLY_API=no
+
+    # Ports
+    ports:
+      # IB Gateway API ports
+      - "4001:4001"  # Paper trading API
+      - "4002:4002"  # Live trading API
+
+      # VNC port for debugging (optional, remove in production)
+      - "5900:5900"
+
+    # Volumes (optional - for persistence)
+    volumes:
+      - ./ibkr-settings:/root/Jts
+      - ./ibkr-logs:/var/log/ibgateway
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # Optional: Your trading backend
+  # trading-backend:
+  #   build: .
+  #   container_name: trading-backend
+  #   depends_on:
+  #     - ib-gateway
+  #   environment:
+  #     - IBKR_HOST=ib-gateway
+  #     - IBKR_PORT=4002
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - .:/app
+  #   command: python backend_server.py

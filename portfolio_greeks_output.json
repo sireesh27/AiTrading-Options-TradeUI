@@ -1,0 +1,232 @@
+{
+    "portfolio_totals": {
+        "net_delta": 482.32579381455554,
+        "net_gamma": -3.2502918764541024,
+        "net_theta": 18.43212595198392,
+        "net_vega": -20.874021059883077,
+        "total_positions": 13,
+        "total_value": 4875.028226945581,
+        "num_underlyings": 5
+    },
+    "by_underlying": {
+        "AAPL": {
+            "underlying": "AAPL",
+            "positions": [
+                {
+                    "symbol": "AAPL",
+                    "type": "stock",
+                    "qty": 11.0,
+                    "delta": 1.0,
+                    "delta_exposure": 11.0,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                    "iv": 0.0,
+                    "value": 3067.3500000000004,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "AAPL251212C00287500",
+                    "type": "option",
+                    "qty": -1.0,
+                    "delta": 0.011324517896444605,
+                    "delta_exposure": -1.1324517896444606,
+                    "gamma": 0.007859585676803947,
+                    "theta": -0.05672415426737762,
+                    "vega": 0.0033028867286036224,
+                    "iv": 0.25959698427480626,
+                    "value": -0.02,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "AAPL251212C00292500",
+                    "type": "option",
+                    "qty": 1.0,
+                    "delta": 0.007928406638275178,
+                    "delta_exposure": 0.7928406638275178,
+                    "gamma": 0.003871183848888689,
+                    "theta": -0.05993390149535513,
+                    "vega": 0.003316991024347373,
+                    "iv": 0.3805613598402042,
+                    "value": 0.0,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "AAPL251212P00267500",
+                    "type": "option",
+                    "qty": 1.0,
+                    "delta": -0.016885645001634756,
+                    "delta_exposure": -1.6885645001634757,
+                    "gamma": 0.007503328064462455,
+                    "theta": -0.11516388009216968,
+                    "vega": 0.007242027208813804,
+                    "iv": 0.3803435203409962,
+                    "value": 0.03,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "AAPL251212P00272500",
+                    "type": "option",
+                    "qty": -1.0,
+                    "delta": -0.050024481522502266,
+                    "delta_exposure": 5.002448152250227,
+                    "gamma": 0.026107385756454514,
+                    "theta": -0.20269221299404308,
+                    "vega": 0.014605173790150517,
+                    "iv": 0.27087504070805823,
+                    "value": -0.09,
+                    "broker": "alpaca_paper"
+                }
+            ],
+            "net_delta": 13.974272526269807,
+            "net_gamma": -2.2592459519907315,
+            "net_theta": 8.43185856738959,
+            "net_vega": -0.7349042285592962,
+            "total_value": 3067.2700000000004
+        },
+        "BTCUSD": {
+            "underlying": "BTCUSD",
+            "positions": [
+                {
+                    "symbol": "BTCUSD",
+                    "type": "stock",
+                    "qty": 0.00807702,
+                    "delta": 1.0,
+                    "delta_exposure": 0.00807702,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                    "iv": 0.0,
+                    "value": 744.630166224,
+                    "broker": "alpaca_paper"
+                }
+            ],
+            "net_delta": 0.00807702,
+            "net_gamma": 0.0,
+            "net_theta": 0.0,
+            "net_vega": 0.0,
+            "total_value": 744.630166224
+        },
+        "DOGEUSD": {
+            "underlying": "DOGEUSD",
+            "positions": [
+                {
+                    "symbol": "DOGEUSD",
+                    "type": "stock",
+                    "qty": 477.158730775,
+                    "delta": 1.0,
+                    "delta_exposure": 477.158730775,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                    "iv": 0.0,
+                    "value": 67.0980607215805,
+                    "broker": "alpaca_paper"
+                }
+            ],
+            "net_delta": 477.158730775,
+            "net_gamma": 0.0,
+            "net_theta": 0.0,
+            "net_vega": 0.0,
+            "total_value": 67.0980607215805
+        },
+        "GOOG": {
+            "underlying": "GOOG",
+            "positions": [
+                {
+                    "symbol": "GOOG",
+                    "type": "stock",
+                    "qty": 1.0,
+                    "delta": 1.0,
+                    "delta_exposure": 1.0,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                    "iv": 0.0,
+                    "value": 314.8,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "GOOG260109C00325000",
+                    "type": "option",
+                    "qty": -1.0,
+                    "delta": 0.368829889471752,
+                    "delta_exposure": -36.8829889471752,
+                    "gamma": 0.015571695109769858,
+                    "theta": -0.17414333147709785,
+                    "vega": 0.31578502289125643,
+                    "iv": 0.27803047895746863,
+                    "value": -6.1,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "GOOG260109C00345000",
+                    "type": "option",
+                    "qty": 1.0,
+                    "delta": 0.1394983391697044,
+                    "delta_exposure": 13.949833916970439,
+                    "gamma": 0.008949586548972818,
+                    "theta": -0.10190035476306067,
+                    "vega": 0.17022388071207095,
+                    "iv": 0.283692983013972,
+                    "value": 1.68,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "GOOG260109P00295000",
+                    "type": "option",
+                    "qty": 1.0,
+                    "delta": -0.2077582242424058,
+                    "delta_exposure": -20.77582242424058,
+                    "gamma": 0.010536732418641243,
+                    "theta": -0.13507638126348676,
+                    "vega": 0.25115759100441404,
+                    "iv": 0.3148840939115545,
+                    "value": 3.3,
+                    "broker": "alpaca_paper"
+                },
+                {
+                    "symbol": "GOOG260109P00305000",
+                    "type": "option",
+                    "qty": -1.0,
+                    "delta": -0.3289369094773112,
+                    "delta_exposure": 32.893690947731116,
+                    "gamma": 0.013825083102477912,
+                    "theta": -0.1628360783953929,
+                    "vega": 0.3069876171384664,
+                    "iv": 0.3041368737809395,
+                    "value": -6.15,
+                    "broker": "alpaca_paper"
+                }
+            ],
+            "net_delta": -9.815286506714223,
+            "net_gamma": -0.9910459244633708,
+            "net_theta": 10.00026738459433,
+            "net_vega": -20.139116831323783,
+            "total_value": 307.53000000000003
+        },
+        "SPY": {
+            "underlying": "SPY",
+            "positions": [
+                {
+                    "symbol": "SPY",
+                    "type": "stock",
+                    "qty": 1.0,
+                    "delta": 1.0,
+                    "delta_exposure": 1.0,
+                    "gamma": 0.0,
+                    "theta": 0.0,
+                    "vega": 0.0,
+                    "iv": 0.0,
+                    "value": 688.5,
+                    "broker": "alpaca_paper"
+                }
+            ],
+            "net_delta": 1.0,
+            "net_gamma": 0.0,
+            "net_theta": 0.0,
+            "net_vega": 0.0,
+            "total_value": 688.5
+        }
+    }
+}
