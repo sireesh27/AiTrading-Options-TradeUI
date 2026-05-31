@@ -31,3 +31,25 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# IBC binaries (auto-login tool — download separately)
+ibc/IBC.jar
+ibc/scripts/
+ibc/LICENSE.txt
+ibc/README.txt
+ibc/userguide.pdf
+ibc/version
+ibc/commandsend.sh
+ibc/enableapi.sh
+ibc/gatewaystartmacos.sh
+ibc/local.ibc-gateway.plist
+ibc/reconnectaccount.sh
+ibc/reconnectdata.sh
+ibc/stop.sh
+ibc/twsstartmacos.sh
+
+# Local IBKR session config (machine-specific)
+jts.ini
+
+# Claude session backup
+.claude/claude_backup/

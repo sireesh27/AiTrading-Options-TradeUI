@@ -11,7 +11,12 @@ from pydantic import BaseModel
 
 import main_tastytrade as tasty_bot
 import alpaca_trader
-import ibkr_manager
+try:
+    import ibkr_manager
+except ModuleNotFoundError:
+    ibkr_manager = None
+    logger_pre = logging.getLogger(__name__)
+    logger_pre.warning("ib_async not installed — IBKR features disabled")
 import massive_options
 from tastytrade import Account, DXLinkStreamer
 from tastytrade.dxfeed import Summary, Greeks, Quote

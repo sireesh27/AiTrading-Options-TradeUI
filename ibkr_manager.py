@@ -1,6 +1,10 @@
 import asyncio
 import logging
+import os
 from ib_async import *
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -8,22 +12,33 @@ class IBKRManager:
     def __init__(self, account_type='live'):
         """Initialize IBKR Manager.
 
-        Args:
-            account_type: 'live' or 'paper' - which account to connect to
+        Supports two connection modes (auto-detected via env vars):
+          1. Docker / IB Gateway (recommended for always-on use):
+             Set IBKR_HOST in .env (e.g. 127.0.0.1 when running Docker locally).
+             Live port 4001, Paper port 4002.
+          2. Local TWS (fallback):
+             No IBKR_HOST set — connects to local TWS.
+             Live port 7496, Paper port 7497.
         """
         self.ib = IB()
         self.connected = False
         self.account_type = account_type
 
-        # Set port based on account type
-        # Port 7496 = Live Trading
-        # Port 7497 = Paper Trading
-        self.port = 7496 if account_type == 'live' else 7497
+        # If IBKR_HOST is set, assume Docker/IB Gateway mode
+        ibkr_host = os.getenv('IBKR_HOST', '').strip()
+        if ibkr_host:
+            self.host = ibkr_host
+            # IB Gateway Docker ports: 4001=live, 4002=paper
+            self.port = int(os.getenv('IBKR_PORT', '4001' if account_type == 'live' else '4002'))
+        else:
+            # Local TWS fallback
+            self.host = '127.0.0.1'
+            self.port = 7496 if account_type == 'live' else 7497
 
         # Use different clientId for each account type to avoid conflicts
-        self.client_id = 1 if account_type == 'live' else 2
+        self.client_id = int(os.getenv('IBKR_CLIENT_ID', '1' if account_type == 'live' else '2'))
 
-        logger.info(f"IBKR Manager initialized for {account_type.upper()} account (port {self.port})")
+        logger.info(f"IBKR Manager initialized for {account_type.upper()} account ({self.host}:{self.port})")
 
     async def connect(self):
         if self.ib.isConnected():
@@ -31,7 +46,7 @@ class IBKRManager:
 
         try:
             logger.info(f"Attempting to connect to IBKR {self.account_type.upper()} on port {self.port}...")
-            await self.ib.connectAsync('127.0.0.1', self.port, clientId=self.client_id, timeout=2)
+            await self.ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=10)
             logger.info(f"Connected to IBKR {self.account_type.upper()} on port {self.port}!")
             self.connected = True
 
@@ -321,10 +336,16 @@ class IBKRManager:
 
 
 def create_ibkr_live_manager():
-    """Create IBKR Manager for LIVE account (port 7496)."""
+    """Create IBKR Manager for LIVE account.
+    Connects to Docker IB Gateway (port 4001) if IBKR_HOST is set,
+    otherwise falls back to local TWS (port 7496).
+    """
     return IBKRManager(account_type='live')
 
 
 def create_ibkr_paper_manager():
-    """Create IBKR Manager for PAPER account (port 7497)."""
+    """Create IBKR Manager for PAPER account.
+    Connects to Docker IB Gateway (port 4002) if IBKR_HOST is set,
+    otherwise falls back to local TWS (port 7497).
+    """
     return IBKRManager(account_type='paper')

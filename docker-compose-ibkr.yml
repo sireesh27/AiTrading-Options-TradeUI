@@ -1,75 +1,63 @@
-# Docker Compose for IB Gateway (Cloud Deployment)
-# This file sets up IB Gateway in a Docker container for cloud deployment
+# IB Gateway Docker Setup
+# - Authenticates automatically on first start using IBC
+# - Sessions last ~7 days; daily auto-restart at 11:45 PM ET (no re-auth needed)
+# - When IBKR forces weekly re-login: connect via VNC on port 5900 and confirm once
+#
+# Usage:
+#   docker compose -f docker-compose-ibkr.yml up -d
+#   VNC viewer: vnc://localhost:5900  (password = VNC_PASSWORD in .env)
 
 version: '3.8'
 
 services:
   ib-gateway:
-    # Using hartza-capital's production-ready IB Gateway image
-    image: ghcr.io/hartza-capital/ib-gateway:stable
+    image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: ib-gateway
-
-    # Restart policy
     restart: unless-stopped
 
-    # Environment variables
     environment:
-      # REQUIRED: Your IBKR credentials
-      - TWS_USERID=${IBKR_USERNAME}
-      - TWS_PASSWORD=${IBKR_PASSWORD}
+      # IBKR credentials
+      TWS_USERID: ${IBKR_USERNAME}
+      TWS_PASSWORD: ${IBKR_PASSWORD}
 
-      # Trading mode: 'live' or 'paper'
-      - TRADING_MODE=${IBKR_TRADING_MODE:-paper}
+      # 'live' or 'paper'
+      TRADING_MODE: ${IBKR_TRADING_MODE:-live}
 
-      # Optional: VNC password for remote access
-      - VNC_SERVER_PASSWORD=${VNC_PASSWORD:-changeme}
+      # VNC access for the weekly manual re-auth
+      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-changeme123}
 
-      # Optional: Read-only API mode
-      - READ_ONLY_API=no
+      # IBC: auto-accept incoming API connections
+      ACCEPT_INCOMING_CONNECTION: yes
+      READ_ONLY_API: no
 
-    # Ports
+      # Auto-restart time (HH:MM) — Gateway restarts daily at this time
+      # Brief ~2 min outage outside market hours; NO re-auth needed
+      TWS_RESTART_TIME: "23:45"
+
     ports:
-      # IB Gateway API ports
-      - "4001:4001"  # Paper trading API
-      - "4002:4002"  # Live trading API
+      - "4001:4001"   # Live trading API  → your ibkr_manager connects here
+      - "4002:4002"   # Paper trading API
+      - "5900:5900"   # VNC — use this for the weekly manual re-login
 
-      # VNC port for debugging (optional, remove in production)
-      - "5900:5900"
-
-    # Volumes (optional - for persistence)
     volumes:
-      - ./ibkr-settings:/root/Jts
-      - ./ibkr-logs:/var/log/ibgateway
+      # Persists Gateway settings & session tokens across container restarts.
+      # This is the key to surviving the full week without re-auth.
+      - ibkr_settings:/root/Jts
+      - ibkr_logs:/var/log/ibgateway
 
-    # Health check
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "4001"]
+      test: ["CMD-SHELL", "nc -z localhost 4001 || nc -z localhost 4002"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s   # Give Gateway time to fully start up
 
-    # Resource limits (adjust based on your needs)
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
 
-  # Optional: Your trading backend
-  # trading-backend:
-  #   build: .
-  #   container_name: trading-backend
-  #   depends_on:
-  #     - ib-gateway
-  #   environment:
-  #     - IBKR_HOST=ib-gateway
-  #     - IBKR_PORT=4002
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - .:/app
-  #   command: python backend_server.py
+volumes:
+  ibkr_settings:   # Persists IBKR session — survives container restarts
+  ibkr_logs:

@@ -2,7 +2,7 @@ import os
 import argparse
 import logging
 from dotenv import load_dotenv
-from tastytrade import Session, Account, OAuthSession
+from tastytrade import Session, Account
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,14 +22,7 @@ def authenticate():
     is_live = os.getenv("TASTY_LIVE", "False").lower() == "true"
 
     if client_secret and refresh_token:
-        try:
-            logger.info(f"Authenticating with OAuth2 ({'LIVE' if is_live else 'CERTIFICATION'})...")
-            session = OAuthSession(client_secret, refresh_token, is_test=not is_live)
-            logger.info("OAuth2 authentication successful!")
-            return session
-        except Exception as e:
-            logger.error(f"OAuth2 authentication failed: {e}")
-            logger.info("Falling back to username/password authentication...")
+        logger.warning("OAuthSession is no longer supported by the tastytrade library. Falling back to username/password authentication.")
 
     # Fallback to username/password (deprecated method)
     username = os.getenv("TASTY_USERNAME")
