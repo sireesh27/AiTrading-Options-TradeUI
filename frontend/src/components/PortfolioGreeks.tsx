@@ -50,9 +50,11 @@ const API_BASE_URL = 'http://localhost:8000';
 
 interface PortfolioGreeksProps {
     refreshTrigger?: number;
+    marketDataSymbol?: string;   // when set (via a position "Details" click), open Market Data for it
+    marketDataNonce?: number;    // bump to re-trigger even if the symbol is unchanged
 }
 
-export const PortfolioGreeks: React.FC<PortfolioGreeksProps> = ({ refreshTrigger = 0 }) => {
+export const PortfolioGreeks: React.FC<PortfolioGreeksProps> = ({ refreshTrigger = 0, marketDataSymbol, marketDataNonce }) => {
     const [data, setData] = useState<PortfolioGreeksData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -80,6 +82,13 @@ export const PortfolioGreeks: React.FC<PortfolioGreeksProps> = ({ refreshTrigger
     useEffect(() => {
         loadData();
     }, [refreshTrigger]);
+
+    // A position "Details" click switches to the Market Data tab.
+    useEffect(() => {
+        if (marketDataSymbol) {
+            setActiveTab('market-data');
+        }
+    }, [marketDataSymbol, marketDataNonce]);
 
     const toggleExpand = (underlying: string) => {
         const newExpanded = new Set(expandedUnderlyings);
@@ -236,7 +245,7 @@ export const PortfolioGreeks: React.FC<PortfolioGreeksProps> = ({ refreshTrigger
                 </div>
 
                 {activeTab === 'market-data' ? (
-                    <MarketDataTab />
+                    <MarketDataTab symbol={marketDataSymbol} symbolNonce={marketDataNonce} />
                 ) : activeTab === 'open-positions' ? (
                     <>
                         <div className="bg-white dark:bg-gray-900 rounded-xl p-6 border border-gray-200 dark:border-gray-800">

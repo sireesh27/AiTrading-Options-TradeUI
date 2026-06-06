@@ -48,8 +48,9 @@ ibc/reconnectdata.sh
 ibc/stop.sh
 ibc/twsstartmacos.sh
 
-# Local IBKR session config (machine-specific)
+# Local IBKR session config (machine-specific, may contain credentials)
 jts.ini
+ibc/config.ini
 
 # Claude session backup
 .claude/claude_backup/

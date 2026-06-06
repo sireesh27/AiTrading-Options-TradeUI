@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional
 from datetime import date
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -259,157 +259,130 @@ async def get_positions():
         }
     }
 
-    # Tastytrade Positions
-    try:
+    # Each broker is fetched independently. Tastytrade/Alpaca SDK calls are
+    # synchronous (blocking), so they run in worker threads via asyncio.to_thread
+    # to avoid freezing the event loop (which would also stall the live WS feed).
+    # IBKR calls are already async. All five run concurrently via asyncio.gather,
+    # turning a ~10s sequential load into ~max(slowest broker).
+    global tasty_session, alpaca_live_client, alpaca_paper_client
+
+    def _fetch_tasty_sync():
         session = get_tasty_session()
-        if session:
-            account = Account.get(session)[0]
+        if not session:
+            return None
+        account = Account.get(session)[0]
+        balances = account.get_balances(session)
+        try:
+            buying_power = float(balances.derivative_buying_power)
+        except AttributeError:
+            buying_power = 0.0
+            logger.warning("Could not find derivative_buying_power, defaulting to 0")
+        tasty_positions = account.get_positions(session)
+        day_pl = 0.0
+        positions = []
+        for p in tasty_positions:
+            if hasattr(p, 'day_pl_close') and p.day_pl_close:
+                day_pl += float(p.day_pl_close)
+            current_price = float(p.mark_price) if p.mark_price else 0.0
+            qty = float(p.quantity)
+            positions.append({
+                "symbol": p.symbol,
+                "qty": qty,
+                "avgPrice": float(p.average_open_price),
+                "currentPrice": current_price,
+                "value": qty * current_price,
+                "pl": qty * (current_price - float(p.average_open_price)),
+                "plPercent": 0.0,
+                "source": "Tastytrade"
+            })
+        return {
+            "totalValue": float(balances.net_liquidating_value),
+            "equity": float(balances.margin_equity),
+            "buyingPower": buying_power,
+            "dayPL": day_pl,
+            "dayTrades": "0 / 3",
+            "positions": positions,
+            "isConnected": True
+        }
 
-            # Fetch Balances
-            balances = account.get_balances(session)
-            response["tastytrade"]["totalValue"] = float(balances.net_liquidating_value)
-            response["tastytrade"]["equity"] = float(balances.margin_equity)
-            # Try to get buying power, handle potential attribute differences
-            try:
-                response["tastytrade"]["buyingPower"] = float(balances.derivative_buying_power)
-            except AttributeError:
-                response["tastytrade"]["buyingPower"] = 0.0
-                logger.warning("Could not find derivative_buying_power, defaulting to 0")
+    def _fetch_alpaca_sync(get_client, label):
+        client = get_client()
+        if not client:
+            return None
+        alpaca_positions = alpaca_trader.get_positions(client)
+        account = client.get_account()
+        positions = []
+        for p in alpaca_positions:
+            qty = float(p.qty)
+            current_price = float(p.current_price)
+            positions.append({
+                "symbol": p.symbol,
+                "qty": qty,
+                "avgPrice": float(p.avg_entry_price),
+                "currentPrice": current_price,
+                "value": qty * current_price,
+                "pl": float(p.unrealized_pl),
+                "plPercent": float(p.unrealized_plpc) * 100,
+                "source": label
+            })
+        return {
+            "totalValue": float(account.portfolio_value),
+            "equity": float(account.equity),
+            "buyingPower": float(account.buying_power),
+            "dayPL": float(account.equity) - float(account.last_equity),
+            "dayTrades": "0 / 3",
+            "positions": positions,
+            "isConnected": True
+        }
 
-            # Fetch positions
-            tasty_positions = account.get_positions(session)
+    async def _fetch_ibkr(get_manager, label):
+        mgr = get_manager()
+        data = await mgr.get_portfolio_data()
+        if data:
+            for pos in data.get("positions", []):
+                pos["source"] = label
+            # Use the authoritative socket-level check so a dropped gateway
+            # is reported as disconnected instead of a stale "connected".
+            data["isConnected"] = mgr.is_connected()
+        return data
 
-            # Calculate Day's P/L from positions (TastyTrade doesn't provide this directly)
-            day_pl = 0.0
-            for p in tasty_positions:
-                # day_pl_close is the realized P/L from positions closed today
-                if hasattr(p, 'day_pl_close') and p.day_pl_close:
-                    day_pl += float(p.day_pl_close)
-            response["tastytrade"]["dayPL"] = day_pl
-            for p in tasty_positions:
-                current_price = float(p.mark_price) if p.mark_price else 0.0
-                qty = float(p.quantity)
-                pos_data = {
-                    "symbol": p.symbol,
-                    "qty": qty,
-                    "avgPrice": float(p.average_open_price),
-                    "currentPrice": current_price,
-                    "value": qty * current_price,
-                    "pl": qty * (current_price - float(p.average_open_price)),
-                    "plPercent": 0.0,
-                    "source": "Tastytrade"
-                }
-                response["tastytrade"]["positions"].append(pos_data)
-            
-            response["tastytrade"]["isConnected"] = True
-    except Exception as e:
-        logger.error(f"Error fetching Tastytrade positions: {e}")
-        response["tastytrade"]["isConnected"] = False
-        global tasty_session
+    results = await asyncio.gather(
+        asyncio.to_thread(_fetch_tasty_sync),
+        asyncio.to_thread(_fetch_alpaca_sync, get_alpaca_live_client, "Alpaca Live"),
+        asyncio.to_thread(_fetch_alpaca_sync, get_alpaca_paper_client, "Alpaca Paper"),
+        _fetch_ibkr(get_ibkr_live_manager, "IBKR Live"),
+        _fetch_ibkr(get_ibkr_paper_manager, "IBKR Paper"),
+        return_exceptions=True,
+    )
+    tasty_res, alpaca_live_res, alpaca_paper_res, ibkr_live_res, ibkr_paper_res = results
+
+    if isinstance(tasty_res, Exception):
+        logger.error(f"Error fetching Tastytrade positions: {tasty_res}")
         tasty_session = None
+    elif tasty_res:
+        response["tastytrade"] = tasty_res
 
-
-    # Alpaca Live Positions
-    try:
-        client = get_alpaca_live_client()
-        if client:
-            alpaca_positions = alpaca_trader.get_positions(client)
-            # Fetch account info
-            account = client.get_account()
-            response["alpaca_live"]["totalValue"] = float(account.portfolio_value)
-            response["alpaca_live"]["equity"] = float(account.equity)
-            response["alpaca_live"]["buyingPower"] = float(account.buying_power)
-            # Calculate Day's P/L: current equity - previous day's equity
-            response["alpaca_live"]["dayPL"] = float(account.equity) - float(account.last_equity)
-
-            for p in alpaca_positions:
-                qty = float(p.qty)
-                current_price = float(p.current_price)
-                pos_data = {
-                    "symbol": p.symbol,
-                    "qty": qty,
-                    "avgPrice": float(p.avg_entry_price),
-                    "currentPrice": current_price,
-                    "value": qty * current_price,
-                    "pl": float(p.unrealized_pl),
-                    "plPercent": float(p.unrealized_plpc) * 100,
-                    "source": "Alpaca Live"
-                }
-                response["alpaca_live"]["positions"].append(pos_data)
-            
-            response["alpaca_live"]["isConnected"] = True
-    except Exception as e:
-        logger.error(f"Error fetching Alpaca Live positions: {e}")
-        response["alpaca_live"]["isConnected"] = False
-        global alpaca_live_client
+    if isinstance(alpaca_live_res, Exception):
+        logger.error(f"Error fetching Alpaca Live positions: {alpaca_live_res}")
         alpaca_live_client = None
+    elif alpaca_live_res:
+        response["alpaca_live"] = alpaca_live_res
 
-    # Alpaca Paper Positions
-    try:
-        client = get_alpaca_paper_client()
-        if client:
-            alpaca_positions = alpaca_trader.get_positions(client)
-            # Fetch account info
-            account = client.get_account()
-            response["alpaca_paper"]["totalValue"] = float(account.portfolio_value)
-            response["alpaca_paper"]["equity"] = float(account.equity)
-            response["alpaca_paper"]["buyingPower"] = float(account.buying_power)
-            # Calculate Day's P/L: current equity - previous day's equity
-            response["alpaca_paper"]["dayPL"] = float(account.equity) - float(account.last_equity)
-
-            for p in alpaca_positions:
-                qty = float(p.qty)
-                current_price = float(p.current_price)
-                pos_data = {
-                    "symbol": p.symbol,
-                    "qty": qty,
-                    "avgPrice": float(p.avg_entry_price),
-                    "currentPrice": current_price,
-                    "value": qty * current_price,
-                    "pl": float(p.unrealized_pl),
-                    "plPercent": float(p.unrealized_plpc) * 100,
-                    "source": "Alpaca Paper"
-                }
-                response["alpaca_paper"]["positions"].append(pos_data)
-
-            response["alpaca_paper"]["isConnected"] = True
-    except Exception as e:
-        logger.error(f"Error fetching Alpaca Paper positions: {e}")
-        response["alpaca_paper"]["isConnected"] = False
-        global alpaca_paper_client
+    if isinstance(alpaca_paper_res, Exception):
+        logger.error(f"Error fetching Alpaca Paper positions: {alpaca_paper_res}")
         alpaca_paper_client = None
+    elif alpaca_paper_res:
+        response["alpaca_paper"] = alpaca_paper_res
 
-    # IBKR Live Positions
-    try:
-        ib_mgr_live = get_ibkr_live_manager()
-        ib_data_live = await ib_mgr_live.get_portfolio_data()
-        if ib_data_live:
-            response["ibkr_live"] = ib_data_live
-            # Update source label for positions
-            for pos in response["ibkr_live"]["positions"]:
-                pos["source"] = "IBKR Live"
-            
-            # Explicitly check if manager thinks it's connected
-            response["ibkr_live"]["isConnected"] = ib_mgr_live.connected
-    except Exception as e:
-        logger.error(f"Error fetching IBKR Live positions: {e}")
-        response["ibkr_live"]["isConnected"] = False
+    if isinstance(ibkr_live_res, Exception):
+        logger.error(f"Error fetching IBKR Live positions: {ibkr_live_res}")
+    elif ibkr_live_res:
+        response["ibkr_live"] = ibkr_live_res
 
-    # IBKR Paper Positions
-    try:
-        ib_mgr_paper = get_ibkr_paper_manager()
-        ib_data_paper = await ib_mgr_paper.get_portfolio_data()
-        if ib_data_paper:
-            response["ibkr_paper"] = ib_data_paper
-            # Update source label for positions
-            for pos in response["ibkr_paper"]["positions"]:
-                pos["source"] = "IBKR Paper"
-            
-            # Explicitly check if manager thinks it's connected
-            response["ibkr_paper"]["isConnected"] = ib_mgr_paper.connected
-    except Exception as e:
-        logger.error(f"Error fetching IBKR Paper positions: {e}")
-        response["ibkr_paper"]["isConnected"] = False
+    if isinstance(ibkr_paper_res, Exception):
+        logger.error(f"Error fetching IBKR Paper positions: {ibkr_paper_res}")
+    elif ibkr_paper_res:
+        response["ibkr_paper"] = ibkr_paper_res
 
     return response
 
@@ -470,19 +443,175 @@ def get_option_greeks(underlying: str, option_symbol: str):
 class GreeksBatchRequest(BaseModel):
     symbols: List[str]
 
+
+def _ibkr_manager_for_account(account: str):
+    """Return the live or paper IBKR manager. Defaults to paper for safety."""
+    if (account or "paper").lower() == "live":
+        return get_ibkr_live_manager(), "live"
+    return get_ibkr_paper_manager(), "paper"
+
+
+@app.get("/api/ibkr/search/{query:path}")
+async def search_ibkr_symbols(query: str):
+    """Autocomplete stock/symbol search as the user types.
+
+    Example: /api/ibkr/search/APP  -> AAPL, APP, APPN, ...
+    """
+    if ibkr_manager is None:
+        raise HTTPException(status_code=503, detail="IBKR support not installed")
+    # Symbol reference search works on either account; prefer whichever connects.
+    manager = get_ibkr_live_manager()
+    try:
+        if not await manager.connect():
+            manager = get_ibkr_paper_manager()
+            if not await manager.connect():
+                raise HTTPException(status_code=503, detail="IBKR not available")
+        return {"query": query, "results": await manager.search_symbols(query)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching symbols for '{query}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ibkr/position/{symbol:path}")
+async def get_ibkr_position(symbol: str, sec_type: str = "stock", account: str = "paper"):
+    """Net position quantity held for a stock/option on the given account.
+
+    Used by the buy/sell ticket to decide whether SELL is available and the max
+    sellable quantity. `sec_type` is 'stock' or 'option'; `symbol` is a ticker or
+    OCC option symbol.
+    """
+    if ibkr_manager is None:
+        raise HTTPException(status_code=503, detail="IBKR support not installed")
+    manager, acct = _ibkr_manager_for_account(account)
+    try:
+        if not await manager.connect():
+            raise HTTPException(status_code=503, detail="IBKR not available")
+        qty = await manager.get_position_qty(sec_type, symbol)
+        return {"account": acct, "symbol": symbol, "secType": sec_type, "quantity": qty}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching IBKR position for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class OrderRequest(BaseModel):
+    account: str = "paper"          # 'paper' (default) or 'live'
+    secType: str = "stock"          # 'stock' or 'option'
+    symbol: str                      # ticker (stock) or OCC symbol (option)
+    action: str                      # 'BUY' or 'SELL'
+    quantity: float
+    orderType: str = "MKT"          # 'MKT' | 'LMT' | 'STP' | 'STP LMT'
+    limitPrice: Optional[float] = None
+    stopPrice: Optional[float] = None
+
+
+@app.get("/api/ibkr/orders")
+async def list_ibkr_orders(account: str = "paper"):
+    """List open/working orders on the given account."""
+    if ibkr_manager is None:
+        raise HTTPException(status_code=503, detail="IBKR support not installed")
+    manager, acct = _ibkr_manager_for_account(account)
+    try:
+        if not await manager.connect():
+            raise HTTPException(status_code=503, detail=f"IBKR {acct} not available")
+        return {"account": acct, "orders": await manager.get_open_orders()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing IBKR orders: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CancelRequest(BaseModel):
+    account: str = "paper"
+    orderId: int
+
+
+@app.post("/api/ibkr/order/cancel")
+async def cancel_ibkr_order(req: CancelRequest):
+    """Cancel an open order by orderId."""
+    if ibkr_manager is None:
+        raise HTTPException(status_code=503, detail="IBKR support not installed")
+    manager, acct = _ibkr_manager_for_account(req.account)
+    try:
+        if not await manager.connect():
+            raise HTTPException(status_code=503, detail=f"IBKR {acct} not available")
+        result = await manager.cancel_order(req.orderId)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Cancel failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling IBKR order {req.orderId}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ibkr/order")
+async def place_ibkr_order(req: OrderRequest):
+    """Place a stock/option order via IBKR (paper by default, live on opt-in)."""
+    if ibkr_manager is None:
+        raise HTTPException(status_code=503, detail="IBKR support not installed")
+
+    manager, acct = _ibkr_manager_for_account(req.account)
+    logger.info(f"Order request: {acct} {req.action} {req.quantity} {req.symbol} "
+                f"({req.secType}, {req.orderType})")
+    try:
+        if not await manager.connect():
+            raise HTTPException(
+                status_code=503,
+                detail=f"IBKR {acct} account not available. Ensure IB Gateway is running and logged in."
+            )
+        result = await manager.place_order(
+            sec_type=req.secType,
+            symbol=req.symbol,
+            action=req.action,
+            quantity=req.quantity,
+            order_type=req.orderType,
+            limit_price=req.limitPrice,
+            stop_price=req.stopPrice,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Order rejected"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error placing IBKR order for {req.symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/greeks-batch")
 async def get_greeks_batch(request: GreeksBatchRequest):
     """Fetch greeks for a batch of symbols."""
     try:
         api = massive_options.MassiveOptionsAPI()
         results = {}
-        
+
+        # Primary source: IBKR model Greeks. Whatever IBKR can price is used
+        # directly; the rest falls through to the Massive API below.
+        ibkr_greeks = {}
+        if ibkr_manager is not None and request.symbols:
+            try:
+                mgr = get_ibkr_live_manager()
+                if await mgr.connect():
+                    ibkr_greeks = await mgr.get_greeks_for_symbols(request.symbols)
+                    logger.info(f"IBKR priced {len(ibkr_greeks)}/{len(request.symbols)} option greeks")
+            except Exception as e:
+                logger.warning(f"IBKR greeks unavailable, falling back to Massive: {e}")
+
         import re
         # Regex for OCC symbol roughly: Root (letters), Date (6 digits), Type (C/P), Strike (8 digits)
         # It handles spaces which might be present in Tastytrade/IBKR symbols (e.g. "SPY   251219C...")
         occ_pattern = re.compile(r'^([A-Z]+)\s*([0-9]{6})([CP])([0-9]{8})$')
 
         for symbol in request.symbols:
+            # Prefer IBKR if it returned greeks for this symbol
+            if ibkr_greeks.get(symbol):
+                results[symbol] = ibkr_greeks[symbol]
+                continue
             try:
                 # 1. Check if it's already a Massive option symbol
                 if symbol.startswith("O:"):
@@ -704,11 +833,15 @@ async def get_tastytrade_option_chain(underlying: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ibkr/option-chain/{underlying}")
-async def get_ibkr_option_chain(underlying: str, expiration: Optional[str] = None):
+async def get_ibkr_option_chain(underlying: str, expiration: Optional[str] = None, strikes: int = 20):
     """Get option chain from IBKR for an underlying symbol.
+
+    Returns the full list of available expirations; per-strike data is loaded for
+    the selected expiration only (nearest by default).
 
     Example: /api/ibkr/option-chain/SPY
     Example with expiration: /api/ibkr/option-chain/SPY?expiration=20241220
+    Example with more strikes: /api/ibkr/option-chain/SPY?strikes=40
     """
     try:
         # Try live first, then paper
@@ -738,12 +871,12 @@ async def get_ibkr_option_chain(underlying: str, expiration: Optional[str] = Non
         if not connected or not manager:
             raise HTTPException(
                 status_code=503,
-                detail="IBKR not available. Please ensure TWS or IB Gateway is running on port 7496 (live) or 7497 (paper)."
+                detail="IBKR not available. Please ensure IB Gateway (port 4001 live / 4002 paper) or TWS (7496 / 7497) is running and logged in."
             )
 
         logger.info(f"Fetching option chain for {underlying} from IBKR...")
 
-        chain_data = await manager.get_option_chain(underlying, expiration)
+        chain_data = await manager.get_option_chain(underlying, expiration, num_strikes=strikes)
 
         if not chain_data:
             raise HTTPException(
@@ -801,11 +934,16 @@ async def get_ibkr_option_chain(underlying: str, expiration: Optional[str] = Non
                     "iv": put.get("iv", 0.0)
                 })
 
+        # Full list of available expirations (so the UI dropdown shows them all);
+        # per-strike data is only present for the selected expiration.
+        all_expirations = chain_data.get("expirations") or ([exp_date] if exp_date else [])
+
         return {
             "broker": "ibkr",
             "underlying": underlying,
             "underlyingPrice": chain_data.get("underlyingPrice", 0.0),
-            "expirations": [exp_date] if exp_date else [],
+            "expirations": all_expirations,
+            "selectedExpiration": exp_date,
             "chain": {
                 exp_date: {
                     "calls": calls,
@@ -919,12 +1057,20 @@ async def get_ibkr_stock_price(symbol: str):
         if not connected or not manager:
             raise HTTPException(
                 status_code=503,
-                detail="IBKR not available. Please ensure TWS or IB Gateway is running on port 7496 (live) or 7497 (paper)."
+                detail="IBKR not available. Please ensure IB Gateway (port 4001 live / 4002 paper) or TWS (7496 / 7497) is running and logged in."
             )
 
         from ib_async import Stock
         stock = Stock(symbol.upper(), 'SMART', 'USD')
         await manager.ib.qualifyContractsAsync(stock)
+
+        # Unknown symbol leaves conId at 0; reqMktData would crash trying to
+        # hash the contract, so reject it with a clear 404 instead.
+        if not getattr(stock, 'conId', 0):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown symbol '{symbol.upper()}'. Check the ticker and try again."
+            )
 
         # Use reqMktData for real-time quotes (as per the guide)
         ticker = manager.ib.reqMktData(stock)
@@ -975,6 +1121,62 @@ async def get_ibkr_stock_price(symbol: str):
     except Exception as e:
         logger.error(f"Error fetching IBKR stock price for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.websocket("/ws/ibkr/stock-price/{symbol}")
+async def ws_ibkr_stock_price(websocket: WebSocket, symbol: str):
+    """Stream live IBKR market data for a ticker over a WebSocket.
+
+    Pushes a JSON quote payload on every IBKR tick update until the client
+    disconnects. Requires IB Gateway/TWS running with market data subscriptions.
+
+    Example: ws://localhost:8000/ws/ibkr/stock-price/AAPL
+    """
+    await websocket.accept()
+
+    if ibkr_manager is None:
+        await websocket.send_json({"error": "IBKR support not installed (ib_async missing)."})
+        await websocket.close()
+        return
+
+    # Try live first, then paper
+    manager = get_ibkr_live_manager()
+    connected = False
+    try:
+        connected = await manager.connect()
+    except Exception as e:
+        logger.warning(f"WS: failed to connect IBKR live: {e}")
+        connected = False
+
+    if not connected:
+        manager = get_ibkr_paper_manager()
+        try:
+            connected = await manager.connect()
+        except Exception as e:
+            logger.warning(f"WS: failed to connect IBKR paper: {e}")
+            connected = False
+
+    if not connected:
+        await websocket.send_json({
+            "error": "IBKR not available. Ensure IB Gateway/TWS is running (ports 4001/4002 or 7496/7497)."
+        })
+        await websocket.close()
+        return
+
+    logger.info(f"WS: streaming live IBKR quotes for {symbol}")
+    try:
+        async for payload in manager.stream_stock_quote(symbol):
+            await websocket.send_json(payload)
+    except WebSocketDisconnect:
+        logger.info(f"WS: client disconnected from {symbol} stream")
+    except Exception as e:
+        logger.error(f"WS: error streaming {symbol}: {e}")
+        try:
+            await websocket.send_json({"error": str(e)})
+        except Exception:
+            pass
+    finally:
+        logger.info(f"WS: closed {symbol} stream")
+
 
 @app.get("/api/portfolio-greeks")
 async def get_portfolio_greeks():
