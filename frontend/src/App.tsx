@@ -12,6 +12,17 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [greeksRefreshTrigger, setGreeksRefreshTrigger] = useState(0);
+  const [marketDataSymbol, setMarketDataSymbol] = useState<string | undefined>(undefined);
+  const [marketDataNonce, setMarketDataNonce] = useState(0);
+
+  const showMarketData = (symbol: string) => {
+    setMarketDataSymbol(symbol);
+    setMarketDataNonce(n => n + 1);
+    // Scroll the Portfolio Greeks / Market Data section into view
+    requestAnimationFrame(() => {
+      document.getElementById('portfolio-greeks-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -80,16 +91,20 @@ function App() {
               <>
                 <SummaryCards totalValue={totalValue} totalDayPL={totalDayPL} />
 
-                <div className="mb-8">
-                  <PortfolioGreeks refreshTrigger={greeksRefreshTrigger} />
+                <div className="mb-8" id="portfolio-greeks-section">
+                  <PortfolioGreeks
+                    refreshTrigger={greeksRefreshTrigger}
+                    marketDataSymbol={marketDataSymbol}
+                    marketDataNonce={marketDataNonce}
+                  />
                 </div>
 
                 <div className="flex flex-col gap-8">
-                  <BrokerSection title="Tasty Trade" id="tastytrade" data={data.tastytrade} />
-                  <BrokerSection title="Alpaca" id="alpaca" data={data.alpaca_live} />
-                  <BrokerSection title="IBKR" id="ibkr" data={data.ibkr_live} />
-                  <BrokerSection title="Alpaca Paper Trading" id="alpaca_paper" data={data.alpaca_paper} />
-                  <BrokerSection title="IBKR Paper Trading" id="ibkr_paper" data={data.ibkr_paper} />
+                  <BrokerSection title="IBKR" id="ibkr" data={data.ibkr_live} onShowDetails={showMarketData} />
+                  <BrokerSection title="IBKR Paper Trading" id="ibkr_paper" data={data.ibkr_paper} onShowDetails={showMarketData} />
+                  <BrokerSection title="Tasty Trade" id="tastytrade" data={data.tastytrade} onShowDetails={showMarketData} />
+                  <BrokerSection title="Alpaca" id="alpaca" data={data.alpaca_live} onShowDetails={showMarketData} />
+                  <BrokerSection title="Alpaca Paper Trading" id="alpaca_paper" data={data.alpaca_paper} onShowDetails={showMarketData} />
                 </div>
               </>
             )}

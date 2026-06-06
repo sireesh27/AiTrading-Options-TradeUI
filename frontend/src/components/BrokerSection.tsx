@@ -8,9 +8,10 @@ interface BrokerSectionProps {
     title: string;
     id: string;
     data: BrokerData;
+    onShowDetails?: (symbol: string) => void;
 }
 
-export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data }) => {
+export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data, onShowDetails }) => {
     const [isOpen, setIsOpen] = useState(true);
     const [activeTab, setActiveTab] = useState<'positions' | 'greeks'>('positions');
     const [greeksData, setGreeksData] = useState<Record<string, any> | null>(null);
@@ -106,7 +107,7 @@ export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data })
 
                         {activeTab === 'positions' ? (
                             <>
-                                <PositionsTable positions={data.positions} />
+                                <PositionsTable positions={data.positions} onShowDetails={onShowDetails} />
                                 <a className="text-primary text-sm font-bold text-center mt-4 block" href="#">View All</a>
                             </>
                         ) : (

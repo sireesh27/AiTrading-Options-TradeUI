@@ -3,9 +3,10 @@ import type { Position } from '../types';
 
 interface PositionsTableProps {
     positions: Position[];
+    onShowDetails?: (symbol: string) => void;
 }
 
-export const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => {
+export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, onShowDetails }) => {
     return (
         <div className="overflow-x-auto">
             <table className="w-full min-w-[600px] text-sm text-left">
@@ -31,7 +32,15 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => 
                             </td>
                             <td className="py-3 pr-2"><div className={`w-3 h-3 rounded-full ${pos.pl >= 0 ? 'bg-green-500' : 'bg-red-500'}`}></div></td>
                             <td className="py-3 pr-2"><div className={`w-3 h-3 rounded-full ${pos.pl >= 0 ? 'bg-blue-500' : 'bg-red-500'}`}></div></td>
-                            <td className="py-3"><a className="text-primary hover:underline" href="#">Details</a></td>
+                            <td className="py-3">
+                                <button
+                                    type="button"
+                                    className="text-primary hover:underline"
+                                    onClick={() => onShowDetails?.(pos.symbol)}
+                                >
+                                    Details
+                                </button>
+                            </td>
                         </tr>
                     ))}
                     {positions.length === 0 && (
