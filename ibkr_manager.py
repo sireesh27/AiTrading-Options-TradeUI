@@ -54,6 +54,54 @@ class IBKRManager:
 
         logger.info(f"IBKR Manager initialized for {account_type.upper()} account ({self.host}:{self.port})")
 
+    @staticmethod
+    def iv_from_ticker(ticker):
+        """Best available implied volatility for an option ticker.
+
+        Priority: IBKR market IV (generic tick 106, `ticker.impliedVolatility`) —
+        this is what TWS/most platforms display, derived from the option's traded
+        price — then modelGreeks.impliedVol (model-derived), then per-side greeks.
+        Falls back to 0.0 when nothing is available (e.g. frozen data after close).
+        """
+        def val(x):
+            try:
+                x = float(x)
+                return x if x == x and x > 0 else None  # not NaN, positive
+            except (TypeError, ValueError):
+                return None
+
+        iv = val(getattr(ticker, 'impliedVolatility', None))
+        if iv is not None:
+            return iv
+        mg = ticker.modelGreeks
+        if mg is not None:
+            v = val(getattr(mg, 'impliedVol', None))
+            if v is not None:
+                return v
+        for g in (ticker.lastGreeks, ticker.askGreeks, ticker.bidGreeks):
+            if g is not None:
+                v = val(getattr(g, 'impliedVol', None))
+                if v is not None:
+                    return v
+        return 0.0
+
+    @staticmethod
+    def price_from_ticker(ticker):
+        """Single source of truth for deriving a price from a ticker:
+        last → mid(bid,ask) → close. Used by both the stock-price endpoint and
+        the option-chain underlying so they never disagree."""
+        def f(v):
+            try:
+                return float(v) if v is not None and v == v else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+        last, bid, ask, close = f(ticker.last), f(ticker.bid), f(ticker.ask), f(ticker.close)
+        if last > 0:
+            return last
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2
+        return close
+
     def is_connected(self):
         """Authoritative live-connection check.
 
@@ -194,7 +242,8 @@ class IBKRManager:
                 "isConnected": False
             }
 
-    async def _collect_tickers(self, contracts, max_wait=4.0, want_greeks=True):
+    async def _collect_tickers(self, contracts, max_wait=4.0, want_greeks=True,
+                               generic_ticks='', settle=0.0):
         """Collect market data for many contracts with a bounded time budget.
 
         reqTickersAsync issues *snapshot* requests and waits for every one to
@@ -204,15 +253,20 @@ class IBKRManager:
         Instead we open streaming subscriptions and poll the ticker objects
         (which update in place) for at most `max_wait` seconds, returning early
         once all tickers have usable data. Worst case is bounded to max_wait.
+
+        `generic_ticks` requests extra IBKR tick types, e.g. '100,101,104,106'
+        (option volume, open interest, hist vol, implied vol).
         """
-        tickers = [self.ib.reqMktData(c, '', False, False) for c in contracts]
+        tickers = [self.ib.reqMktData(c, generic_ticks, False, False) for c in contracts]
 
         def has_data(t):
             def ok(v):
                 return v is not None and v == v and v > 0  # not None, not NaN, >0
             # When greeks are required, a price alone does NOT count as "done" —
             # otherwise the loop exits as soon as a (fast) close price arrives,
-            # before IBKR has computed modelGreeks.
+            # before IBKR has computed modelGreeks. (Open interest, when requested,
+            # is read best-effort — it isn't delivered for frozen/weekend data and
+            # must not block the early-exit.)
             if want_greeks:
                 return t.modelGreeks is not None
             return ok(t.bid) or ok(t.ask) or ok(t.last) or ok(t.close)
@@ -223,6 +277,12 @@ class IBKRManager:
             await asyncio.sleep(0.2)
             if all(has_data(t) for t in tickers):
                 break
+
+        # Greeks often arrive a beat before bid/ask finish ticking. A short
+        # settle lets the quotes catch up so a snapshot isn't internally stale
+        # (e.g. a momentary wide/old bid/ask that breaks put-call parity).
+        if settle > 0:
+            await asyncio.sleep(settle)
 
         for c in contracts:
             try:
@@ -280,7 +340,8 @@ class IBKRManager:
         for s in underlyings:
             self.ib.reqMktData(s, '', False, False)
         try:
-            tickers = await self._collect_tickers([c for _, c in valid], max_wait=4.0)
+            # request tick 106 (option implied vol) for market-based IV
+            tickers = await self._collect_tickers([c for _, c in valid], max_wait=4.0, generic_ticks='106')
         finally:
             for s in underlyings:
                 try:
@@ -306,7 +367,7 @@ class IBKRManager:
                     "theta": sf(g.theta),
                     "vega": sf(g.vega),
                     "rho": 0.0,
-                    "iv": sf(g.impliedVol),
+                    "iv": sf(self.iv_from_ticker(ticker)),
                 }
         return result
 
@@ -576,10 +637,12 @@ class IBKRManager:
             # Get strikes around current price (limit to reasonable range)
             strikes = sorted([float(s) for s in chain.strikes])
 
-            # Underlying price (already fetched concurrently above) to filter strikes
-            mkt_price = stock_tickers[0].marketPrice() if stock_tickers else None
-            if mkt_price and mkt_price == mkt_price and mkt_price > 0:
-                current_price = mkt_price
+            # Underlying price (already fetched concurrently above) to filter strikes.
+            # Uses the shared last→mid→close priority so it matches the
+            # /api/ibkr/stock-price endpoint exactly.
+            px = self.price_from_ticker(stock_tickers[0]) if stock_tickers else 0.0
+            if px > 0:
+                current_price = px
             else:
                 current_price = strikes[len(strikes)//2]  # Use middle strike as fallback
 
@@ -638,7 +701,9 @@ class IBKRManager:
             # Stream market data for the qualified contracts with a bounded
             # time budget instead of snapshot requests (which would block on the
             # slowest illiquid strike for IBKR's full ~11s snapshot timeout).
-            tickers = await self._collect_tickers(qualified, max_wait=4.0)
+            # generic ticks: 100=option volume, 101=open interest, 106=implied vol
+            # settle: let bid/ask finish ticking after greeks arrive (parity-clean)
+            tickers = await self._collect_tickers(qualified, max_wait=5.0, generic_ticks='100,101,106', settle=0.8)
             logger.info(f"Received {len(tickers)} tickers")
 
             def extract_option_data(ticker):
@@ -659,18 +724,22 @@ class IBKRManager:
                     except (ValueError, TypeError):
                         return default
 
+                # Open interest comes from generic tick 101 into call/putOpenInterest
+                right = getattr(ticker.contract, 'right', '')
+                oi_val = ticker.callOpenInterest if right == 'C' else ticker.putOpenInterest
+
                 return {
                     "bid": safe_float(ticker.bid if ticker.bid and ticker.bid > 0 else 0.0),
                     "ask": safe_float(ticker.ask if ticker.ask and ticker.ask > 0 else 0.0),
                     "last": safe_float(ticker.last if ticker.last and ticker.last > 0 else 0.0),
                     "volume": safe_int(ticker.volume),
-                    "openInterest": 0,  # IBKR doesn't provide OI in ticker
+                    "openInterest": safe_int(oi_val),
                     "delta": safe_float(ticker.modelGreeks.delta if ticker.modelGreeks else 0.0),
                     "gamma": safe_float(ticker.modelGreeks.gamma if ticker.modelGreeks else 0.0),
                     "theta": safe_float(ticker.modelGreeks.theta if ticker.modelGreeks else 0.0),
                     "vega": safe_float(ticker.modelGreeks.vega if ticker.modelGreeks else 0.0),
                     "rho": 0.0,  # Not always available
-                    "iv": safe_float(ticker.modelGreeks.impliedVol if ticker.modelGreeks else 0.0)
+                    "iv": safe_float(IBKRManager.iv_from_ticker(ticker))
                 }
 
             # Group tickers by strike, keying call/put off each contract's actual
