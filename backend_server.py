@@ -1088,16 +1088,9 @@ async def get_ibkr_stock_price(symbol: str):
 
         bid = safe_float(ticker.bid)
         ask = safe_float(ticker.ask)
-        last = safe_float(ticker.last)
-        close = safe_float(ticker.close)
 
-        # Calculate price - prefer last, then mid, then close
-        if last > 0:
-            price = last
-        elif bid > 0 and ask > 0:
-            price = (bid + ask) / 2
-        else:
-            price = close
+        # Shared last→mid→close priority (same as the option-chain underlying)
+        price = manager.price_from_ticker(ticker)
 
         # Cancel market data subscription
         manager.ib.cancelMktData(stock)
