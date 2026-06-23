@@ -1,56 +1,82 @@
-# IB Gateway Docker Setup
+# IB Gateway Docker Setup — Live + Paper
+#
 # - Authenticates automatically on first start using IBC
 # - Sessions last ~7 days; daily auto-restart at 11:45 PM ET (no re-auth needed)
-# - When IBKR forces weekly re-login: connect via VNC on port 5900 and confirm once
+# - When IBKR forces weekly re-login: connect via VNC and confirm once
+#   Live VNC:  vnc://your-vm-ip:5900
+#   Paper VNC: vnc://your-vm-ip:5901
 #
 # Usage:
 #   docker compose -f docker-compose-ibkr.yml up -d
-#   VNC viewer: vnc://localhost:5900  (password = VNC_PASSWORD in .env)
+#   docker compose -f docker-compose-ibkr.yml logs -f
 
 version: '3.8'
 
 services:
-  ib-gateway:
+
+  ib-gateway-live:
     image: ghcr.io/gnzsnz/ib-gateway:stable
-    container_name: ib-gateway
+    container_name: ib-gateway-live
     restart: unless-stopped
 
     environment:
-      # IBKR credentials
-      TWS_USERID: ${IBKR_USERNAME}
-      TWS_PASSWORD: ${IBKR_PASSWORD}
-
-      # 'live' or 'paper'
-      TRADING_MODE: ${IBKR_TRADING_MODE:-live}
-
-      # VNC access for the weekly manual re-auth
-      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-changeme123}
-
-      # IBC: auto-accept incoming API connections
+      TWS_USERID:             ${IBKR_USERNAME}
+      TWS_PASSWORD:           ${IBKR_PASSWORD}
+      TRADING_MODE:           live
+      VNC_SERVER_PASSWORD:    ${VNC_PASSWORD:-changeme123}
       ACCEPT_INCOMING_CONNECTION: yes
-      READ_ONLY_API: no
-
-      # Auto-restart time (HH:MM) — Gateway restarts daily at this time
-      # Brief ~2 min outage outside market hours; NO re-auth needed
-      TWS_RESTART_TIME: "23:45"
+      READ_ONLY_API:          no
+      TWS_RESTART_TIME:       "23:45"
 
     ports:
-      - "4001:4001"   # Live trading API  → your ibkr_manager connects here
-      - "4002:4002"   # Paper trading API
-      - "5900:5900"   # VNC — use this for the weekly manual re-login
+      - "4001:4001"   # Live API  → backend connects here
+      - "5900:5900"   # VNC for live — weekly manual re-auth
 
     volumes:
-      # Persists Gateway settings & session tokens across container restarts.
-      # This is the key to surviving the full week without re-auth.
-      - ibkr_settings:/root/Jts
-      - ibkr_logs:/var/log/ibgateway
+      - ibkr_live_settings:/root/Jts
+      - ibkr_live_logs:/var/log/ibgateway
 
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 4001 || nc -z localhost 4002"]
+      test: ["CMD-SHELL", "nc -z localhost 4001"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s   # Give Gateway time to fully start up
+      start_period: 90s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+
+  ib-gateway-paper:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: ib-gateway-paper
+    restart: unless-stopped
+
+    environment:
+      TWS_USERID:             ${IBKR_USERNAME}
+      TWS_PASSWORD:           ${IBKR_PASSWORD}
+      TRADING_MODE:           paper
+      VNC_SERVER_PASSWORD:    ${VNC_PASSWORD:-changeme123}
+      ACCEPT_INCOMING_CONNECTION: yes
+      READ_ONLY_API:          no
+      TWS_RESTART_TIME:       "23:50"   # stagger restart from live
+
+    ports:
+      - "4002:4001"   # Paper API → backend connects on 4002
+      - "5901:5900"   # VNC for paper — weekly manual re-auth
+
+    volumes:
+      - ibkr_paper_settings:/root/Jts
+      - ibkr_paper_logs:/var/log/ibgateway
+
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 4001"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
     deploy:
       resources:
@@ -59,5 +85,7 @@ services:
           memory: 2G
 
 volumes:
-  ibkr_settings:   # Persists IBKR session — survives container restarts
-  ibkr_logs:
+  ibkr_live_settings:
+  ibkr_live_logs:
+  ibkr_paper_settings:
+  ibkr_paper_logs:
