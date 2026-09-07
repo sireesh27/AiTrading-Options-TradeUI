@@ -8,3 +8,6 @@ pydantic
 tastytrade
 alpaca-py
 ib-async
+
+# IBKR Web API (headless OAuth 1.0a — no Gateway/TWS needed)
+ibind[oauth]

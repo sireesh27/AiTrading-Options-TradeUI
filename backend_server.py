@@ -11,12 +11,30 @@ from pydantic import BaseModel
 
 import main_tastytrade as tasty_bot
 import alpaca_trader
+
+# IBKR connectivity has two interchangeable backends, selected by IBKR_API_MODE:
+#   'tws'    (default) — socket TWS API via ib_async; needs IB Gateway/TWS running
+#   'webapi'           — headless REST Web API via OAuth 1.0a; no Gateway needed
+IBKR_API_MODE = os.getenv("IBKR_API_MODE", "tws").strip().lower()
+
 try:
     import ibkr_manager
 except ModuleNotFoundError:
     ibkr_manager = None
-    logger_pre = logging.getLogger(__name__)
-    logger_pre.warning("ib_async not installed — IBKR features disabled")
+    logging.getLogger(__name__).warning("ib_async not installed — TWS IBKR mode unavailable")
+
+try:
+    import ibkr_webapi_manager
+except ModuleNotFoundError:
+    ibkr_webapi_manager = None
+    logging.getLogger(__name__).warning("ibind not installed — Web API IBKR mode unavailable")
+
+
+def ibkr_available() -> bool:
+    """True if the selected IBKR backend is importable."""
+    if IBKR_API_MODE == "webapi":
+        return ibkr_webapi_manager is not None
+    return ibkr_manager is not None
 import massive_options
 from tastytrade import Account, DXLinkStreamer
 from tastytrade.dxfeed import Summary, Greeks, Quote
@@ -65,13 +83,19 @@ def get_alpaca_paper_client():
 def get_ibkr_live_manager():
     global ibkr_live_manager
     if not ibkr_live_manager:
-        ibkr_live_manager = ibkr_manager.create_ibkr_live_manager()
+        if IBKR_API_MODE == "webapi":
+            ibkr_live_manager = ibkr_webapi_manager.create_ibkr_webapi_live_manager()
+        else:
+            ibkr_live_manager = ibkr_manager.create_ibkr_live_manager()
     return ibkr_live_manager
 
 def get_ibkr_paper_manager():
     global ibkr_paper_manager
     if not ibkr_paper_manager:
-        ibkr_paper_manager = ibkr_manager.create_ibkr_paper_manager()
+        if IBKR_API_MODE == "webapi":
+            ibkr_paper_manager = ibkr_webapi_manager.create_ibkr_webapi_paper_manager()
+        else:
+            ibkr_paper_manager = ibkr_manager.create_ibkr_paper_manager()
     return ibkr_paper_manager
 
 async def fetch_market_data(session, symbols):
@@ -457,7 +481,7 @@ async def search_ibkr_symbols(query: str):
 
     Example: /api/ibkr/search/APP  -> AAPL, APP, APPN, ...
     """
-    if ibkr_manager is None:
+    if not ibkr_available():
         raise HTTPException(status_code=503, detail="IBKR support not installed")
     # Symbol reference search works on either account; prefer whichever connects.
     manager = get_ibkr_live_manager()
@@ -482,7 +506,7 @@ async def get_ibkr_position(symbol: str, sec_type: str = "stock", account: str =
     sellable quantity. `sec_type` is 'stock' or 'option'; `symbol` is a ticker or
     OCC option symbol.
     """
-    if ibkr_manager is None:
+    if not ibkr_available():
         raise HTTPException(status_code=503, detail="IBKR support not installed")
     manager, acct = _ibkr_manager_for_account(account)
     try:
@@ -511,7 +535,7 @@ class OrderRequest(BaseModel):
 @app.get("/api/ibkr/orders")
 async def list_ibkr_orders(account: str = "paper"):
     """List open/working orders on the given account."""
-    if ibkr_manager is None:
+    if not ibkr_available():
         raise HTTPException(status_code=503, detail="IBKR support not installed")
     manager, acct = _ibkr_manager_for_account(account)
     try:
@@ -533,7 +557,7 @@ class CancelRequest(BaseModel):
 @app.post("/api/ibkr/order/cancel")
 async def cancel_ibkr_order(req: CancelRequest):
     """Cancel an open order by orderId."""
-    if ibkr_manager is None:
+    if not ibkr_available():
         raise HTTPException(status_code=503, detail="IBKR support not installed")
     manager, acct = _ibkr_manager_for_account(req.account)
     try:
@@ -553,7 +577,7 @@ async def cancel_ibkr_order(req: CancelRequest):
 @app.post("/api/ibkr/order")
 async def place_ibkr_order(req: OrderRequest):
     """Place a stock/option order via IBKR (paper by default, live on opt-in)."""
-    if ibkr_manager is None:
+    if not ibkr_available():
         raise HTTPException(status_code=503, detail="IBKR support not installed")
 
     manager, acct = _ibkr_manager_for_account(req.account)
@@ -1060,6 +1084,16 @@ async def get_ibkr_stock_price(symbol: str):
                 detail="IBKR not available. Please ensure IB Gateway (port 4001 live / 4002 paper) or TWS (7496 / 7497) is running and logged in."
             )
 
+        # Web API mode: the manager fetches quotes over REST, no ib_async ticker.
+        if IBKR_API_MODE == "webapi":
+            quote = await manager.get_stock_price(symbol)
+            if not quote or quote.get("error") or not quote.get("price"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Quote not found for {symbol}. Check the ticker and your IBKR market-data subscriptions."
+                )
+            return quote
+
         from ib_async import Stock
         stock = Stock(symbol.upper(), 'SMART', 'USD')
         await manager.ib.qualifyContractsAsync(stock)
@@ -1126,7 +1160,7 @@ async def ws_ibkr_stock_price(websocket: WebSocket, symbol: str):
     """
     await websocket.accept()
 
-    if ibkr_manager is None:
+    if not ibkr_available():
         await websocket.send_json({"error": "IBKR support not installed (ib_async missing)."})
         await websocket.close()
         return

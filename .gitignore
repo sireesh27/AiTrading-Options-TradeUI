@@ -52,5 +52,10 @@ ibc/twsstartmacos.sh
 jts.ini
 ibc/config.ini
 
+# IBKR Web API OAuth private keys — NEVER commit these
+secrets/
+*.pem
+oauth1.json
+
 # Claude session backup
 .claude/claude_backup/
