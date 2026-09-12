@@ -8,6 +8,15 @@
 #
 # Login/2FA: IBC auto-logs in. The LIVE login triggers an IB Key push on your phone
 # — approve it. On timeout it re-tries (TWOFA_TIMEOUT_ACTION=restart).
+#
+# Session schedule (all times America/New_York):
+#   - Daily AUTO_RESTART_TIME after market hours: gateway restarts, session is
+#     reused, NO login needed.
+#   - IBKR invalidates sessions every Sunday 01:00 ET; the first gateway start
+#     after that needs a full login (2FA on live). The gateway-scheduler service
+#     restarts the gateways Sunday 11:00 AM ET so that login happens then — one
+#     IB Key tap per week, at a predictable time — and the nightly restart that
+#     evening reuses the fresh session.
 # Live and paper are separate IBKR logins, so paper needs its own credentials
 # (IBKR_PAPER_USERNAME / IBKR_PAPER_PASSWORD); falls back to live creds if unset.
 #
@@ -32,7 +41,7 @@ services:
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      AUTO_RESTART_TIME:             "11:00 AM"   # local to TZ below
+      AUTO_RESTART_TIME:             "11:45 PM"   # daily, after market hours (TZ above); no re-login
     ports:
       - "127.0.0.1:4001:4003"   # Live API  (socat bridge to internal 4001)
       - "127.0.0.1:5900:5900"   # VNC (live)
@@ -64,7 +73,7 @@ services:
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      AUTO_RESTART_TIME:             "11:05 AM"   # staggered 5 min from live
+      AUTO_RESTART_TIME:             "11:50 PM"   # daily, after market hours; staggered from live
     ports:
       - "127.0.0.1:4002:4004"   # Paper API (socat bridge to internal 4002)
       - "127.0.0.1:5901:5900"   # VNC (paper)
@@ -81,6 +90,29 @@ services:
         limits:
           cpus: '1'
           memory: 2G
+
+  # Restarts the gateways every Sunday 11:00 AM ET (first start after IBKR's
+  # Sunday 01:00 ET session reset) so the weekly 2FA login lands at a known time.
+  # Talks to the Docker daemon through the mounted socket. Override the cron
+  # expressions with WEEKLY_REAUTH_CRON_LIVE / _PAPER (5-field cron, TZ-local).
+  gateway-scheduler:
+    image: docker:cli
+    container_name: ib-gateway-scheduler
+    restart: unless-stopped
+    environment:
+      TZ: America/New_York
+      CRON_LIVE:  ${WEEKLY_REAUTH_CRON_LIVE:-0 11 * * 0}
+      CRON_PAPER: ${WEEKLY_REAUTH_CRON_PAPER:-5 11 * * 0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache tzdata >/dev/null 2>&1 || true
+        { echo "$$CRON_LIVE docker restart ib-gateway-live"; echo "$$CRON_PAPER docker restart ib-gateway-paper"; } > /etc/crontabs/root
+        echo "gateway-scheduler: TZ=$$TZ now=$$(date)"; echo "crontab:"; cat /etc/crontabs/root
+        exec crond -f -l 6
 
 volumes:
   ibkr_live_settings:
