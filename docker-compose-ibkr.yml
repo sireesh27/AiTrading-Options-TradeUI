@@ -26,12 +26,13 @@ services:
       TWS_USERID:                   ${IBKR_USERNAME}
       TWS_PASSWORD:                 ${IBKR_PASSWORD}
       TRADING_MODE:                 live
+      TZ:                           America/New_York
       VNC_SERVER_PASSWORD:          ${VNC_PASSWORD:-changeme123}
       TWS_ACCEPT_INCOMING:          accept
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      AUTO_RESTART_TIME:             "11:45 PM"
+      AUTO_RESTART_TIME:             "11:00 AM"   # local to TZ below
     ports:
       - "127.0.0.1:4001:4003"   # Live API  (socat bridge to internal 4001)
       - "127.0.0.1:5900:5900"   # VNC (live)
@@ -57,12 +58,13 @@ services:
       TWS_USERID:                   ${IBKR_PAPER_USERNAME:-${IBKR_USERNAME}}
       TWS_PASSWORD:                 ${IBKR_PAPER_PASSWORD:-${IBKR_PASSWORD}}
       TRADING_MODE:                 paper
+      TZ:                           America/New_York
       VNC_SERVER_PASSWORD:          ${VNC_PASSWORD:-changeme123}
       TWS_ACCEPT_INCOMING:          accept
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      AUTO_RESTART_TIME:             "11:50 PM"   # staggered from live
+      AUTO_RESTART_TIME:             "11:05 AM"   # staggered 5 min from live
     ports:
       - "127.0.0.1:4002:4004"   # Paper API (socat bridge to internal 4002)
       - "127.0.0.1:5901:5900"   # VNC (paper)
