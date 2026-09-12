@@ -1,5 +1,7 @@
 # Running IBKR on the Cloud
 
+> **The actual GCP runbook for this repo is [GCP_DEPLOYMENT.md](GCP_DEPLOYMENT.md).** The material below is a general survey of hosting options.
+
 ## 🎯 Overview
 
 Interactive Brokers requires TWS (Trader Workstation) or IB Gateway to be running for API connections. Here are the best ways to run IBKR on cloud platforms in 2025.

@@ -2,6 +2,8 @@
 
 This directory contains backend scripts for trading with TastyTrade, Alpaca, and IBKR brokers.
 
+> **Deploying to GCP?** See [GCP_DEPLOYMENT.md](GCP_DEPLOYMENT.md) for the step-by-step runbook (VM sizing, deploy script, SSH tunnels, weekly re-auth schedule).
+
 ## Setup
 
 1. **Install Dependencies:**
