@@ -1,18 +1,60 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { BrokerData } from '../types';
 import { PositionsTable } from './PositionsTable';
 import { MarketGreeksTable } from './MarketGreeksTable';
-import { fetchGreeksBatch } from '../api';
+import { fetchGreeksBatch, reauthIbkr } from '../api';
 
 interface BrokerSectionProps {
     title: string;
     id: string;
     data: BrokerData;
     onShowDetails?: (symbol: string) => void;
+    /** IBKR only: which gateway the Re-authenticate button restarts. */
+    reauthAccount?: 'live' | 'paper';
+    /** Re-fetches dashboard data; used to poll for reconnection after a re-auth. */
+    onRefresh?: () => Promise<void> | void;
 }
 
-export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data, onShowDetails }) => {
+export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data, onShowDetails, reauthAccount, onRefresh }) => {
     const [isOpen, setIsOpen] = useState(true);
+    const [reauthBusy, setReauthBusy] = useState(false);
+    const [reauthMsg, setReauthMsg] = useState<string | null>(null);
+    // Latest connection state, readable from inside the async polling loop
+    // (the `data` prop captured by the closure would be stale).
+    const connectedRef = useRef(data.isConnected);
+    useEffect(() => { connectedRef.current = data.isConnected; }, [data.isConnected]);
+
+    const handleReauth = async () => {
+        if (!reauthAccount || reauthBusy) return;
+        if (data.isConnected && !window.confirm(
+            `${title} is currently connected. Restarting the gateway will disconnect it and run a fresh login` +
+            (reauthAccount === 'live' ? ' (sends an IB Key 2FA push to your phone).' : '.') + ' Continue?'
+        )) return;
+
+        setReauthBusy(true);
+        setReauthMsg(null);
+        try {
+            const res = await reauthIbkr(reauthAccount);
+            setReauthMsg(res.message);
+            // Gateway restart + login takes ~30-60s (longer for live while you
+            // approve the push). Poll for up to ~2 minutes, stop once connected.
+            for (let i = 0; i < 12; i++) {
+                await new Promise(r => setTimeout(r, 10000));
+                await onRefresh?.();
+                if (connectedRef.current) {
+                    setReauthMsg('Re-authenticated and connected.');
+                    return;
+                }
+            }
+            setReauthMsg(reauthAccount === 'live'
+                ? 'Still not connected. Approve the IB Key push on your phone, then press Refresh.'
+                : 'Still not connected. Check the gateway logs (docker logs ib-gateway-paper).');
+        } catch (e: any) {
+            setReauthMsg(e?.message ?? 'Re-authentication failed');
+        } finally {
+            setReauthBusy(false);
+        }
+    };
     const [activeTab, setActiveTab] = useState<'positions' | 'greeks'>('positions');
     const [greeksData, setGreeksData] = useState<Record<string, any> | null>(null);
     const [loadingGreeks, setLoadingGreeks] = useState(false);
@@ -46,6 +88,19 @@ export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data, o
                     <span className="material-symbols-outlined text-gray-400 dark:text-gray-500 cursor-grab group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors">drag_indicator</span>
                     <h2 className="text-[#111418] dark:text-white text-lg sm:text-xl font-bold leading-tight tracking-[-0.015em]">{title}</h2>
                     <div className={`w-3 h-3 rounded-full ${data.isConnected ? 'bg-green-500' : 'bg-red-500'}`} title={data.isConnected ? "Connected" : "Disconnected"}></div>
+                    {reauthAccount && (
+                        <button
+                            onClick={handleReauth}
+                            disabled={reauthBusy}
+                            title="Restart the IB Gateway and run a fresh login (weekly 2FA re-auth, or if the gateway is stuck)"
+                            className={`ml-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold transition-colors disabled:opacity-60 disabled:cursor-wait ${data.isConnected
+                                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                                : 'bg-primary text-white hover:bg-blue-600'}`}
+                        >
+                            <span className="material-symbols-outlined text-sm">{reauthBusy ? 'hourglass_top' : 'key'}</span>
+                            {reauthBusy ? 'Re-authenticating...' : 'Re-authenticate'}
+                        </button>
+                    )}
                 </div>
                 <button
                     className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
@@ -54,6 +109,12 @@ export const BrokerSection: React.FC<BrokerSectionProps> = ({ title, id, data, o
                     <span className="material-symbols-outlined">{isOpen ? 'expand_less' : 'expand_more'}</span>
                 </button>
             </div>
+
+            {reauthMsg && (
+                <p className={`-mt-3 text-xs ${reauthMsg.startsWith('Re-authenticated') ? 'text-green-600 dark:text-green-500' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {reauthMsg}
+                </p>
+            )}
 
             {isOpen && (
                 <>

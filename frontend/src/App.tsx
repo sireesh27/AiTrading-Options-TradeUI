@@ -100,8 +100,8 @@ function App() {
                 </div>
 
                 <div className="flex flex-col gap-8">
-                  <BrokerSection title="IBKR" id="ibkr" data={data.ibkr_live} onShowDetails={showMarketData} />
-                  <BrokerSection title="IBKR Paper Trading" id="ibkr_paper" data={data.ibkr_paper} onShowDetails={showMarketData} />
+                  <BrokerSection title="IBKR" id="ibkr" data={data.ibkr_live} onShowDetails={showMarketData} reauthAccount="live" onRefresh={loadData} />
+                  <BrokerSection title="IBKR Paper Trading" id="ibkr_paper" data={data.ibkr_paper} onShowDetails={showMarketData} reauthAccount="paper" onRefresh={loadData} />
                   <BrokerSection title="Tasty Trade" id="tastytrade" data={data.tastytrade} onShowDetails={showMarketData} />
                   <BrokerSection title="Alpaca" id="alpaca" data={data.alpaca_live} onShowDetails={showMarketData} />
                   <BrokerSection title="Alpaca Paper Trading" id="alpaca_paper" data={data.alpaca_paper} onShowDetails={showMarketData} />

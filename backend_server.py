@@ -574,6 +574,77 @@ async def cancel_ibkr_order(req: CancelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ReauthRequest(BaseModel):
+    account: str = "paper"          # 'paper' (default) or 'live'
+
+
+# Gateway container per account; overridable if the compose names change.
+_GATEWAY_CONTAINERS = {
+    "live": os.getenv("IBKR_GATEWAY_CONTAINER_LIVE", "ib-gateway-live"),
+    "paper": os.getenv("IBKR_GATEWAY_CONTAINER_PAPER", "ib-gateway-paper"),
+}
+
+
+@app.post("/api/ibkr/reauth")
+async def reauth_ibkr_gateway(req: ReauthRequest):
+    """Force a fresh IB Gateway login by restarting its Docker container.
+
+    IBKR requires a full re-authentication once a week (the first start after
+    the Sunday 01:00 ET reset); daily auto-restarts reuse the session. IBC
+    normally re-logs in by itself, but if the gateway is wedged -- or you want
+    to trigger the login/2FA push right now -- this restarts the container so
+    IBC runs the login flow again. Live sends an IB Key push to the IBKR
+    Mobile app; paper logs in unattended.
+    """
+    global ibkr_live_manager, ibkr_paper_manager
+    acct = (req.account or "paper").lower()
+    container = _GATEWAY_CONTAINERS.get(acct)
+    if not container:
+        raise HTTPException(status_code=400, detail="account must be 'live' or 'paper'")
+
+    # Drop the cached client so the next request reconnects to the new session
+    # instead of reusing a socket that is about to die with the old gateway.
+    if acct == "live" and ibkr_live_manager is not None:
+        try:
+            ibkr_live_manager.disconnect()
+        except Exception:
+            pass
+        ibkr_live_manager = None
+    elif acct == "paper" and ibkr_paper_manager is not None:
+        try:
+            ibkr_paper_manager.disconnect()
+        except Exception:
+            pass
+        ibkr_paper_manager = None
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "restart", container,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=90)
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="docker CLI not available on the backend host")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=f"docker restart {container} timed out")
+    if proc.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"docker restart failed: {err.decode(errors='ignore').strip()}",
+        )
+
+    logger.info(f"IBKR {acct} gateway '{container}' restarted for re-authentication")
+    return {
+        "ok": True,
+        "account": acct,
+        "container": container,
+        "message": (
+            "Gateway restarting. Approve the IB Key push on your phone; reconnecting..."
+            if acct == "live" else
+            "Gateway restarting; paper logs in automatically in about 30s."
+        ),
+    }
+
 @app.post("/api/ibkr/order")
 async def place_ibkr_order(req: OrderRequest):
     """Place a stock/option order via IBKR (paper by default, live on opt-in)."""
