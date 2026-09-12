@@ -31,7 +31,7 @@ services:
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      TWS_RESTART_TIME:             "23:45"
+      AUTO_RESTART_TIME:             "11:45 PM"
     ports:
       - "127.0.0.1:4001:4003"   # Live API  (socat bridge to internal 4001)
       - "127.0.0.1:5900:5900"   # VNC (live)
@@ -62,7 +62,7 @@ services:
       READ_ONLY_API:                "no"
       TWOFA_TIMEOUT_ACTION:         restart
       RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
-      TWS_RESTART_TIME:             "23:50"   # staggered from live
+      AUTO_RESTART_TIME:             "11:50 PM"   # staggered from live
     ports:
       - "127.0.0.1:4002:4004"   # Paper API (socat bridge to internal 4002)
       - "127.0.0.1:5901:5900"   # VNC (paper)
