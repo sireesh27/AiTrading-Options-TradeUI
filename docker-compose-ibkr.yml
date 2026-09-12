@@ -1,16 +1,20 @@
-# IB Gateway Docker Setup — Live + Paper
+# IB Gateway Docker Setup — Live + Paper (gnzsnz/ib-gateway image)
 #
-# - Authenticates automatically on first start using IBC
-# - Sessions last ~7 days; daily auto-restart at 11:45 PM ET (no re-auth needed)
-# - When IBKR forces weekly re-login: connect via VNC and confirm once
-#   Live VNC:  vnc://your-vm-ip:5900
-#   Paper VNC: vnc://your-vm-ip:5901
+# Port layout: the gateway binds to 127.0.0.1 INSIDE the container, and the image
+# bridges it with socat to 4003 (live) / 4004 (paper). We publish those on the
+# host as 4001 (live) / 4002 (paper), which is what ibkr_manager.py expects when
+# IBKR_HOST is set. Bound to 127.0.0.1 on the host because the TWS API socket is
+# unencrypted/unauthenticated — for a remote backend, change to 0.0.0.0 + firewall.
+#
+# Login/2FA: IBC auto-logs in. The LIVE login triggers an IB Key push on your phone
+# — approve it. On timeout it re-tries (TWOFA_TIMEOUT_ACTION=restart).
+# Live and paper are separate IBKR logins, so paper needs its own credentials
+# (IBKR_PAPER_USERNAME / IBKR_PAPER_PASSWORD); falls back to live creds if unset.
 #
 # Usage:
 #   docker compose -f docker-compose-ibkr.yml up -d
 #   docker compose -f docker-compose-ibkr.yml logs -f
-
-version: '3.8'
+#   VNC:  live  -> vnc://127.0.0.1:5900   paper -> vnc://127.0.0.1:5901
 
 services:
 
@@ -18,31 +22,27 @@ services:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: ib-gateway-live
     restart: unless-stopped
-
     environment:
-      TWS_USERID:             ${IBKR_USERNAME}
-      TWS_PASSWORD:           ${IBKR_PASSWORD}
-      TRADING_MODE:           live
-      VNC_SERVER_PASSWORD:    ${VNC_PASSWORD:-changeme123}
-      ACCEPT_INCOMING_CONNECTION: yes
-      READ_ONLY_API:          no
-      TWS_RESTART_TIME:       "23:45"
-
+      TWS_USERID:                   ${IBKR_USERNAME}
+      TWS_PASSWORD:                 ${IBKR_PASSWORD}
+      TRADING_MODE:                 live
+      VNC_SERVER_PASSWORD:          ${VNC_PASSWORD:-changeme123}
+      TWS_ACCEPT_INCOMING:          accept
+      READ_ONLY_API:                "no"
+      TWOFA_TIMEOUT_ACTION:         restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
+      TWS_RESTART_TIME:             "23:45"
     ports:
-      - "4001:4001"   # Live API  → backend connects here
-      - "5900:5900"   # VNC for live — weekly manual re-auth
-
+      - "127.0.0.1:4001:4003"   # Live API  (socat bridge to internal 4001)
+      - "127.0.0.1:5900:5900"   # VNC (live)
     volumes:
-      - ibkr_live_settings:/root/Jts
-      - ibkr_live_logs:/var/log/ibgateway
-
+      - ibkr_live_settings:/home/ibgateway/Jts
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 4001"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 90s
-
+      start_period: 120s
     deploy:
       resources:
         limits:
@@ -53,31 +53,27 @@ services:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: ib-gateway-paper
     restart: unless-stopped
-
     environment:
-      TWS_USERID:             ${IBKR_USERNAME}
-      TWS_PASSWORD:           ${IBKR_PASSWORD}
-      TRADING_MODE:           paper
-      VNC_SERVER_PASSWORD:    ${VNC_PASSWORD:-changeme123}
-      ACCEPT_INCOMING_CONNECTION: yes
-      READ_ONLY_API:          no
-      TWS_RESTART_TIME:       "23:50"   # stagger restart from live
-
+      TWS_USERID:                   ${IBKR_PAPER_USERNAME:-${IBKR_USERNAME}}
+      TWS_PASSWORD:                 ${IBKR_PAPER_PASSWORD:-${IBKR_PASSWORD}}
+      TRADING_MODE:                 paper
+      VNC_SERVER_PASSWORD:          ${VNC_PASSWORD:-changeme123}
+      TWS_ACCEPT_INCOMING:          accept
+      READ_ONLY_API:                "no"
+      TWOFA_TIMEOUT_ACTION:         restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT:  "yes"
+      TWS_RESTART_TIME:             "23:50"   # staggered from live
     ports:
-      - "4002:4001"   # Paper API → backend connects on 4002
-      - "5901:5900"   # VNC for paper — weekly manual re-auth
-
+      - "127.0.0.1:4002:4004"   # Paper API (socat bridge to internal 4002)
+      - "127.0.0.1:5901:5900"   # VNC (paper)
     volumes:
-      - ibkr_paper_settings:/root/Jts
-      - ibkr_paper_logs:/var/log/ibgateway
-
+      - ibkr_paper_settings:/home/ibgateway/Jts
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 4001"]
+      test: ["CMD-SHELL", "nc -z localhost 4002"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 90s
-
+      start_period: 120s
     deploy:
       resources:
         limits:
@@ -86,6 +82,4 @@ services:
 
 volumes:
   ibkr_live_settings:
-  ibkr_live_logs:
   ibkr_paper_settings:
-  ibkr_paper_logs:
