@@ -2,7 +2,9 @@
 # deploy_ibkr.sh — Deploy IB Gateway (Live + Paper + Sunday scheduler) on a GCP VM
 #
 # Run ON the VM (e.g. via the console's SSH-in-browser or Cloud Shell):
-#   curl -sSL https://raw.githubusercontent.com/sireesh27/AiTrading-Options-TradeUI/master/deploy_ibkr.sh | bash
+#   curl -sSLo deploy_ibkr.sh https://raw.githubusercontent.com/sireesh27/AiTrading-Options-TradeUI/master/deploy_ibkr.sh
+#   bash deploy_ibkr.sh
+# (download first -- it prompts for credentials, which 'curl | bash' can't do)
 #
 # The gateways' API ports (4001 live / 4002 paper) and VNC ports (5900 / 5901)
 # are bound to 127.0.0.1 on the VM -- the TWS API socket is unauthenticated, so
