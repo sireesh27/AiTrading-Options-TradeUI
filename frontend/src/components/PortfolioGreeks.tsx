@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MarketGreeksTable } from './MarketGreeksTable';
 import { MarketDataTab } from './MarketDataTab';
 
+import { API_BASE_URL, apiFetch } from '../api';
 interface PortfolioTotals {
     net_delta: number;
     net_gamma: number;
@@ -46,7 +47,6 @@ interface PortfolioGreeksData {
     by_underlying: Record<string, UnderlyingData>;
 }
 
-const API_BASE_URL = 'http://localhost:8000';
 
 interface PortfolioGreeksProps {
     refreshTrigger?: number;
@@ -65,7 +65,7 @@ export const PortfolioGreeks: React.FC<PortfolioGreeksProps> = ({ refreshTrigger
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/portfolio-greeks`);
+            const response = await apiFetch(`${API_BASE_URL}/api/portfolio-greeks`);
             if (!response.ok) {
                 throw new Error(`Error fetching portfolio Greeks: ${response.statusText}`);
             }

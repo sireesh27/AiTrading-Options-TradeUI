@@ -19,6 +19,14 @@ This directory contains backend scripts for trading with TastyTrade, Alpaca, and
 
 ## 1. Backend Server (FastAPI)
 
+**Authentication:** every `/api/*` and `/ws/*` route requires the shared key in
+`BACKEND_API_KEY` (`.env`), sent as an `X-API-Key` header (or `?api_key=` on
+WebSockets). The dashboard reads the same value from `frontend/.env.local`
+(`VITE_API_KEY`). Generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`. If the key is
+unset the API is open — local development only.
+
+
 ### Start the Server:
 ```bash
 python backend_server.py

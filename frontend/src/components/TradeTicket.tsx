@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
-const API_BASE_URL = 'http://localhost:8000';
 
+import { API_BASE_URL, apiFetch } from '../api';
 type Account = 'paper' | 'live';
 type Side = 'BUY' | 'SELL';
 type OrderType = 'MKT' | 'LMT' | 'STP' | 'STP LMT';
@@ -59,7 +59,7 @@ export const TradeTicket: React.FC<TradeTicketProps> = ({
     const refreshHeldQty = useCallback(async () => {
         try {
             const url = `${API_BASE_URL}/api/ibkr/position/${encodeURIComponent(symbol)}?sec_type=${secType}&account=${account}`;
-            const r = await fetch(url);
+            const r = await apiFetch(url);
             if (r.ok) {
                 const d = await r.json();
                 setHeldQty(d.quantity || 0);
@@ -116,7 +116,7 @@ export const TradeTicket: React.FC<TradeTicketProps> = ({
                 limitPrice: needsLimit ? parseFloat(limitPrice) : null,
                 stopPrice: needsStop ? parseFloat(stopPrice) : null,
             };
-            const r = await fetch(`${API_BASE_URL}/api/ibkr/order`, {
+            const r = await apiFetch(`${API_BASE_URL}/api/ibkr/order`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

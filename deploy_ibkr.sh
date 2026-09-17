@@ -68,7 +68,12 @@ else
     read -rsp "  PAPER password: " IBKR_PAPER_PASS; echo
     read -rsp "  VNC password (only used if you ever VNC in): " VNC_PASS; echo
 
+    API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev/null || openssl rand -base64 32 | tr -d '=+/')
+    printf 'VITE_API_KEY=%s
+' "$API_KEY" > frontend/.env.local
     cat >> .env << ENVEOF
+# --- Backend API auth (same value in frontend/.env.local as VITE_API_KEY) ---
+BACKEND_API_KEY=${API_KEY}
 # --- IBKR Gateway (docker-compose-ibkr.yml) ---
 IBKR_USERNAME=${IBKR_USER}
 IBKR_PASSWORD=${IBKR_PASS}
@@ -81,7 +86,7 @@ IBKR_PORT_LIVE=4001
 IBKR_PORT_PAPER=4002
 ENVEOF
     chmod 600 .env
-    info ".env written."
+    info ".env written (includes a generated BACKEND_API_KEY; matching VITE_API_KEY in frontend/.env.local)."
 fi
 
 # ── 4. Pull & start (live, paper, Sunday 11 AM ET scheduler) ─────────────────

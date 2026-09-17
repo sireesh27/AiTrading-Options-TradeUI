@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { TradeTicket } from './TradeTicket';
 
+import { API_BASE_URL, apiFetch, wsUrl } from '../api';
 interface StockQuote {
     symbol: string;
     price: number;
@@ -42,8 +43,6 @@ interface OptionChainData {
 
 type BrokerSource = 'tastytrade' | 'ibkr' | 'massive';
 
-const API_BASE_URL = 'http://localhost:8000';
-const WS_BASE_URL = 'ws://localhost:8000';
 
 // Derive the underlying ticker from a position symbol. Handles OCC option
 // symbols (e.g. "AAPL  260605C00310000" or "O:SPY251219C00450000") by taking
@@ -145,7 +144,7 @@ export const MarketDataTab: React.FC<MarketDataTabProps> = ({ symbol: externalSy
         setLoadingQuote(true);
         try {
             const endpoint = getStockPriceEndpoint(symbol, brokerSource);
-            const response = await fetch(endpoint);
+            const response = await apiFetch(endpoint);
             if (!response.ok) {
                 // Try to get error detail from response
                 let errorDetail = `Failed to fetch quote for ${symbol} from ${brokerSource}`;
@@ -177,7 +176,7 @@ export const MarketDataTab: React.FC<MarketDataTabProps> = ({ symbol: externalSy
         setLoadingChain(true);
         try {
             const endpoint = getOptionChainEndpoint(symbol, brokerSource, expiration, strikes ?? numStrikes);
-            const response = await fetch(endpoint);
+            const response = await apiFetch(endpoint);
             if (!response.ok) {
                 // Try to get error detail from response
                 let errorDetail = `Failed to fetch option chain for ${symbol} from ${brokerSource}`;
@@ -267,7 +266,7 @@ export const MarketDataTab: React.FC<MarketDataTabProps> = ({ symbol: externalSy
         const handle = setTimeout(async () => {
             try {
                 setSearchingSymbols(true);
-                const r = await fetch(`${API_BASE_URL}/api/ibkr/search/${encodeURIComponent(q)}`);
+                const r = await apiFetch(`${API_BASE_URL}/api/ibkr/search/${encodeURIComponent(q)}`);
                 if (r.ok) {
                     const d = await r.json();
                     setSuggestions(d.results || []);
@@ -331,7 +330,7 @@ export const MarketDataTab: React.FC<MarketDataTabProps> = ({ symbol: externalSy
             return;
         }
 
-        const ws = new WebSocket(`${WS_BASE_URL}/ws/ibkr/stock-price/${ticker}`);
+        const ws = new WebSocket(wsUrl(`/ws/ibkr/stock-price/${ticker}`));
         wsRef.current = ws;
 
         ws.onopen = () => setIsLive(true);

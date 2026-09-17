@@ -29,3 +29,7 @@ dist-ssr
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# local env (API key) -- never commit
+.env.local
+.env.*.local

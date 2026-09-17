@@ -5,9 +5,15 @@ import logging
 from typing import List, Optional
 from datetime import date
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+import secrets
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load .env before anything reads os.getenv (IBKR_API_MODE, BACKEND_API_KEY, ...).
+load_dotenv()
 
 import main_tastytrade as tasty_bot
 import alpaca_trader
@@ -16,6 +22,16 @@ import alpaca_trader
 #   'tws'    (default) — socket TWS API via ib_async; needs IB Gateway/TWS running
 #   'webapi'           — headless REST Web API via OAuth 1.0a; no Gateway needed
 IBKR_API_MODE = os.getenv("IBKR_API_MODE", "tws").strip().lower()
+
+# Shared secret that gates every /api/* and /ws/* route. The dashboard sends it
+# as an X-API-Key header (or ?api_key= for WebSockets). Unset = auth disabled,
+# which is only acceptable for local development.
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "").strip()
+_PROTECTED_PREFIXES = ("/api/", "/ws/")
+
+
+def api_key_ok(provided) -> bool:
+    return bool(BACKEND_API_KEY) and provided is not None and secrets.compare_digest(provided, BACKEND_API_KEY)
 
 try:
     import ibkr_manager
@@ -43,8 +59,24 @@ import asyncio
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+if BACKEND_API_KEY:
+    logger.info("API key authentication ENABLED for /api/* and /ws/*")
+else:
+    logger.warning("BACKEND_API_KEY not set — API is UNAUTHENTICATED (local dev only)")
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """Reject unauthenticated calls to protected routes (registered before CORS so
+    CORS stays outermost and 401s still carry CORS headers)."""
+    if (BACKEND_API_KEY and request.method != "OPTIONS"
+            and request.url.path.startswith(_PROTECTED_PREFIXES)):
+        provided = request.headers.get("x-api-key") or request.query_params.get("api_key")
+        if not api_key_ok(provided):
+            return JSONResponse({"detail": "Missing or invalid API key"}, status_code=401)
+    return await call_next(request)
 
 # CORS configuration
 app.add_middleware(
@@ -1227,8 +1259,13 @@ async def ws_ibkr_stock_price(websocket: WebSocket, symbol: str):
     Pushes a JSON quote payload on every IBKR tick update until the client
     disconnects. Requires IB Gateway/TWS running with market data subscriptions.
 
-    Example: ws://localhost:8000/ws/ibkr/stock-price/AAPL
+    Example: ws://localhost:8000/ws/ibkr/stock-price/AAPL?api_key=...
     """
+    if BACKEND_API_KEY:
+        provided = websocket.headers.get("x-api-key") or websocket.query_params.get("api_key")
+        if not api_key_ok(provided):
+            await websocket.close(code=1008)   # policy violation: bad/missing key
+            return
     await websocket.accept()
 
     if not ibkr_available():

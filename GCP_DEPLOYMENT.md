@@ -66,7 +66,9 @@ The script:
 2. installs Docker + compose if missing,
 3. clones/updates the repo into `~/AiTrading-Options-TradeUI`,
 4. prompts for the live, paper and VNC credentials and writes them to
-   `.env` (`chmod 600`, git-ignored) together with `IBKR_HOST=127.0.0.1`,
+   `.env` (`chmod 600`, git-ignored) together with `IBKR_HOST=127.0.0.1` and a
+   generated `BACKEND_API_KEY` (mirrored to `frontend/.env.local` as
+   `VITE_API_KEY`) — every `/api/*` and `/ws/*` route requires it,
 5. pulls the image and starts live, paper and the scheduler.
 
 **No GCP firewall rules are needed.** The API ports (4001/4002) and VNC ports
@@ -160,4 +162,5 @@ gcloud compute ssh duckdb-vm --zone us-south1-a --project options-data-475811 --
 | Live never logs in, no push arrives | Check the phone has IBKR Mobile with IB Key enabled; IBC re-sends the push on every timeout. `docker logs ib-gateway-live` |
 | Container "unhealthy" but API works | Old healthcheck; recreate with `docker compose ... up -d` |
 | Backend says "IBKR not available" | Tunnel not open (Option A) or gateway not logged in — check `ps` health and logs |
+| Dashboard shows "Failed to fetch" / API returns 401 | `VITE_API_KEY` (frontend/.env.local) doesn't match `BACKEND_API_KEY` (.env); fix and restart both |
 | Gateways on PC and VM fight each other | Run them in one place only (section 0) |
